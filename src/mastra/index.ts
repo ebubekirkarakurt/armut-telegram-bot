@@ -1,7 +1,14 @@
+// === bot.js ===
 import { Mastra } from '@mastra/core/mastra';
 import { createLogger } from '@mastra/core/logger';
 import { LibSQLStore } from '@mastra/libsql';
 import { weatherAgent } from './agents';
+
+import { Telegraf } from 'telegraf';
+import dotenv from 'dotenv';
+import axios from 'axios';
+
+dotenv.config();
 
 export const mastra = new Mastra({
   agents: { weatherAgent },
@@ -9,20 +16,32 @@ export const mastra = new Mastra({
   logger: createLogger({ name: 'Mastra', level: 'info' }),
 });
 
-// Bot kısmı:
-import { Telegraf } from 'telegraf';
-import dotenv from 'dotenv';
-import { data } from './data/data';
-
-dotenv.config();
-
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
-
 const userStates = new Map();
 
 bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
   const userInput = ctx.message.text.trim();
+
+  const result = await axios.get('http://localhost:3001/api/serviceProviders');
+  const data = result.data.providers.slice(0, 5);
+
+  if (userInput.toLowerCase().includes('iş ilanları')) {
+    const result = await axios.get('http://localhost:3001/api/serviceProviders');
+    const data = result.data.providers.slice(0, 5);
+
+    if (data.length === 0) {
+      await ctx.reply('Hiç ilan bulunamadı.');
+      return;
+    }
+
+    const message = data.map((item, index) => 
+      `${index + 1}. ${item.name} – ${item.category} (${item.rating} ⭐)\n${item.location} – ${item.available ? 'Müsait' : 'Meşgul'} ${item.reservedTime}`
+    ).join('\n\n');
+
+    await ctx.replyWithMarkdown(message);
+    return;
+  }
 
   const existing = userStates.get(userId);
 
@@ -55,11 +74,8 @@ bot.on('text', async (ctx) => {
     }
 
     const availableProviders = categoryData.providers.filter(
-      (p) =>
-        p.availability &&
-        (!existing.location || p.location.toLowerCase().includes(existing.location.toLowerCase()))
+      (p) => p.availability && (!existing.location || p.location.toLowerCase().includes(existing.location.toLowerCase()))
     );
-
 
     if (availableProviders.length === 0) {
       await ctx.reply("Bu kategoride şu anda müsait görevli bulunmamaktadır.");
@@ -88,7 +104,7 @@ bot.on('text', async (ctx) => {
 
     const { category, missing } = parsed;
 
-    const state: Record<string, any> = {
+    const state = {
       category,
       location: undefined,
       date: undefined,
@@ -100,7 +116,7 @@ bot.on('text', async (ctx) => {
       state.waitingFor = missing[0];
       userStates.set(userId, state);
 
-      const questions: Record<string, string> = {
+      const questions = {
         location: "Lütfen konumunuzu belirtir misiniz?",
         date: "Hangi gün için randevu oluşturmak istersiniz?",
         time: "Saat kaçta hizmet almak istiyorsunuz?",
@@ -120,11 +136,8 @@ bot.on('text', async (ctx) => {
     }
 
     const availableProviders = categoryData.providers.filter(
-      (p) =>
-        p.availability &&
-        (!state.location || p.location.toLowerCase().includes(state.location.toLowerCase()))
+      (p) => p.availability && (!state.location || p.location.toLowerCase().includes(state.location.toLowerCase()))
     );
-
 
     if (availableProviders.length === 0) {
       await ctx.reply("Bu kategoride şu anda müsait görevli bulunmamaktadır.");
